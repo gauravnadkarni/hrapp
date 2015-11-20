@@ -1,0 +1,77 @@
+[-
+
+    use DBI;
+    use MUMMS;
+
+    use Date::Manip;
+
+    ($client_id) = &authenticate();
+
+    $reviewSSH = 33;
+    $reviewSCP = 33;
+
+    if ($fdat{Update}) {
+	
+	# Get the handle for this client_id
+	$dbh = &dbh("mumms");	
+        $sth = $dbh->prepare("SELECT handle FROM client WHERE client_id=?");
+        $sth->execute($client_id);
+
+	# the select should return only a single row
+        while ( @row = $sth->fetchrow_array ) {
+        	$handle = "@row";
+         }    	
+
+	# prepare the data on odb and scp to this machine
+	@args = ('/var/www/mumms/bin/prepareAndGetHRData', '--handle', $handle);
+	$prepareMsg = qx(@args);
+
+	# insert the data into the database
+	@args = ('/var/www/mumms/bin/updatePersons', '--firm_id', "$client_id", '--db', 'mumms', '--import_file', "/var/www/mumms/hrData/$handle");
+	$updateMsg = qx(@args);
+    }
+
+-]
+
+
+<html>
+<head>
+<title>Update</title>
+
+<link rel="stylesheet" type="text/css" href="../mumms.css">
+</head>
+
+<body>
+<table width="95%" border="0" height="88">
+   <tr>
+      <td height="88"width="70%"><img src="/tr-images/HR_logo.gif"  alt="mumms Software Human Resources Module"></td>
+      <td height="88" width="30%"></td>
+   </tr>
+</table>
+
+<a href="persons.html">Persons</a> | <a href="tracking_items.html">Tracking Items</a> | <a href="expires.html">Notices</a> | <a href="update.html">Update</a>
+
+<hr size="1">
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td class="page-heading">Update HR Module</td>
+    <td align="right"><form><input type="submit" name="Update" value="Update HR Module"></form></td>
+  </tr>
+</table>
+
+<hr size="1">
+<p>[+ $prepareMsg +]</p>
+<p>[+ $updateMsg +]</p>
+
+[$ if ($fdat{Update}) $]
+<p>If one of the above steps failed, please click on this link to send an email to <a href="mailto:support@mumms.com?subject=HR Update Failed - [+ $handle +]&body=[+ $prepareMsg +][+ $updateMsg +]">support@mumms.com</a></p>
+[- delete $fdat{Update}; -]
+[$ else $]
+<p><i>Updating the HR Module may take several minutes. This message will be replaced upon completion.</i></p>
+[$ endif $]
+
+<hr size="1">
+</body>
+
+</html>

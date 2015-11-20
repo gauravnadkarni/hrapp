@@ -1,0 +1,218 @@
+[-
+    use DBI;
+    use MUMMS;
+
+    use CGI::Cookie;
+    use Date::Manip;
+
+    ($client_id) = &authenticate();
+
+    $dbh = &dbh("mumms");
+
+    @UNITS = qw(years months weeks days);
+
+    %cookies = fetch CGI::Cookie;
+    %state = $cookies{state}->value() if $cookies{state};
+    $state{date} ||= '';
+
+    $has_units = grep { $fdat{$_} } @UNITS;
+
+    if ($fdat{byoffset}) {
+        %UNIT_MAX = (years => 100, months => 60, weeks => 156, days => 365);
+        foreach $unit (@UNITS) {
+            $error{$unit} = 'not-digit', next unless $fdat{$unit} =~ /^\d+$/;
+            $error{$unit} = 'max' unless !$fdat{$unit} || $fdat{$unit} <= $UNIT_MAX{$unit};
+        }
+        unless (keys %error) {
+            $offset = '+ ';
+            $offset .= "$fdat{years} years " if $fdat{years};
+            $offset .= "$fdat{months} months " if $fdat{months};
+            $offset .= "$fdat{weeks} weeks " if $fdat{weeks};
+            $offset .= "$fdat{days} days" if $fdat{days} || $fdat{days} == 0 && $offset eq '+ ';
+            $date = &DateCalc("today", $offset);
+        }
+    }
+    elsif ($fdat{date}) {
+        @fdat{@UNITS} = qw(0 0 0 0);
+        $error{date} = 'parse' unless $date = &ParseDate($fdat{date});
+    }
+
+    if (!$date && !keys %error) {
+        $date = &Date_SetTime(&ParseDate('next month'), 0, 0, 0);
+    }
+
+    if ($date) {
+        $sth = $dbh->prepare(q{
+            SELECT P.Person_ID, P.First_Name, P.Last_Name, P.Date_Inactive,
+                   TI.Name, TI.Repeats,
+                   TO_CHAR(PTI.Expires, 'MM/DD/YYYY') as Expires,
+                   TO_CHAR(PTI.Issued, 'MM/DD/YYYY') as Issued
+              FROM Person P,
+                   Tracking_Item TI,
+                   Person_Tracking_Item PTI
+             WHERE P.Person_ID = PTI.Person_ID
+               AND P.Client_ID = PTI.Client_ID
+               AND TI.Tracking_Item_ID = PTI.Tracking_Item_ID
+               AND TI.Client_ID = PTI.Client_ID
+               AND ((PTI.Expires < ? and TI.Repeats > 0) OR (PTI.Expires IS NULL and TI.Repeats = 0))
+               AND P.Client_ID = ?
+			   AND TI.Repeats >= '0'
+	       AND TI.Repeats >= '0'
+	       AND (P.Date_inactive IS NULL OR P.Date_inactive > ?)
+          ORDER BY P.Last_Name, P.First_Name, TI.Name
+        }) or die $dbh->errstr();
+        $sth->execute(&UnixDate($date, "%Y%m%d"), $client_id, &UnixDate('today', "%Y%m%d")) or die $sth->errstr();
+        push @recs, $rec if $rec = $sth->fetchrow_hashref();
+
+        $fdat{date} = &UnixDate($date, "%m/%d/%Y"); 
+        $state{date} = &UnixDate($date, "%Y%m%d");
+        $cookie = new CGI::Cookie(-path => $ENV{REQUEST_URI},
+                                  -name => 'state',
+                                  -value => \%state);
+        $req_rec->header_out('Set-Cookie' => $cookie);
+    }
+
+    foreach $unit (@UNITS) {
+        $fdat{$unit} ||= 0;
+    }
+
+-]
+<html>
+<head>
+<script langauge="JavaScript">
+<!--
+
+function onCheckAllClick () {
+    with (document.letter)
+        if (person_id.length)
+            for (var i = 0; i < person_id.length; i++)
+                person_id[i].checked = all_persons.checked
+        else person_id.checked = all_persons.checked
+}
+
+function onPersonClick () {
+    with (document.letter)
+        if (person_id.length) {
+            for (var i = 0; i < person_id.length; i++)
+                if (!person_id[i].checked) {
+                    all_persons.checked = false
+                    break
+                }
+            if (i == person_id.length)
+                all_persons.checked = true
+        }
+        else all_persons.checked = person_id.checked
+}
+
+//-->
+</script>
+<link rel="stylesheet" type="text/css" href="../mumms.css">
+</head>
+<body>
+<table width="95%" border="0" height="88">
+   <tr>
+      <td height="88"width="70%"><img src="/tr-images/HR_logo.gif"   alt="mumms Software Human Resources Module"></td>
+      <td height="88" width="30%"></td>
+   </tr>
+</table>
+
+<a href="persons.html">Persons</a> | <a href="tracking_items.html">Tracking Items</a> | <strong>Notices</strong> | <a href="update.html">Update</a>
+
+<hr size="1">
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td class="page-heading">
+      Expired Tracking Items
+    </td>
+    <td align="right">&nbsp;</td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+
+            [$ if $error{date} $]
+            <div class="error">Please enter a date.<div>
+            [$ endif $]
+
+            <form style="margin-bottom: 0px">
+              Expires by date
+                <input class="small-number-input" name="date">
+                <input class="small-submit" type="submit" name="bydate" value="Go">
+            </form>
+
+<!-- COMMENTED OUT BY STEVE ON 11/17/04 BECAUSE IT DOESN'T WORK CORRECTLY AND LINDA SAID IS UNNECESSARY
+            <strong>- or -</strong><br>
+
+            [$ if grep { $_ eq 'not-digit' } @error{@UNITS} $]
+            <div class="error">Please enter a <em>number</em> greater than zero.<div>
+            [$ endif $]
+
+            [$ foreach $unit (@UNITS) $]
+            [$ if $error{$unit} eq 'max' $]
+            Please enter a number no greater than [+ $UNIT_MAX{$unit} +] for the number of [+ $unit +].
+            [$ endif $]
+            [$ endforeach $]
+
+            <form>
+              Expires in <input class="small-number-input" size="4" name="years"> years,
+                <input class="small-number-input" size="4" name="months"> months,
+                <input class="small-number-input" size="4" name="weeks"> weeks,
+                <input class="small-number-input" size="4" name="days"> days.
+                <input class="small-submit" type="submit" name="byoffset" value="Go">
+            </form>
+-->
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<hr size="1">
+
+<form name="letter" action="letter.html" method="GET">
+<input type="submit" name="print" value="Print">
+
+        [$ if @recs $]
+<table width="50%" border="0" cellpadding="0" cellspacing="5">
+  <tr>
+    <th width="1%" align="left" nowrap><input type="checkbox" name="all_persons" onclick="onCheckAllClick()"></th>
+    <th colspan="3" align="left" nowrap>Last Name</th>
+  </tr>
+  <tr>
+    <th align="left">&nbsp;</th>
+    <th align="left">Tracking Item</th>
+    <th align="left">&nbsp;</th>
+    <th align="left">Expires</th>
+  </tr>
+  [- $last = 0 -]
+  [$ while $rec = pop @recs || $sth->fetchrow_hashref() $]
+  [$ if $$rec{person_id} != $last $]
+  <tr>
+    <td valign="top"><input type="checkbox" value="[+ $$rec{person_id} +]" name="person_id" value="checked" onclick="onPersonClick()"></td>
+    <td colspan="3" valign="top">
+      <strong>[+ $$rec{last_name} +], [+ $$rec{first_name} +]</strong>
+    </td>
+  </tr>
+  [$ endif $]
+  <tr>
+    <td>&nbsp;</td>
+    <td>[+ $$rec{name} +]</td>
+    <td>&nbsp;</td>
+    <td>[+ $$rec{expires} || 'Unknown' +]</td>
+  </tr>
+  [- $last = $$rec{person_id} -]
+  [$ endwhile $]
+</table>
+
+        [$ else $]
+        There are no tracking items due to expire before this date.
+        [$ endif $]
+<input type="hidden" name="date" value="[+ &UnixDate($date, "%Y%m%d") +]">
+</form>
+</body>
+</html>
+[- $dbh->disconnect() -]

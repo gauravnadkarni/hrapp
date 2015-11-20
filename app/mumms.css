@@ -1,0 +1,74 @@
+body {
+    font-family: Verdana, Helvetica, Arial;
+    font-size: smaller;
+}
+
+tr {
+    font-family: Verdana, Helvetica, Arial;
+    font-size: smaller;
+}
+
+th, .monkey {
+    font-family: Verdana, Helvetica, Arial;
+    text-align: left;
+}
+
+a:visited {
+    color: black;
+}
+
+a:hover {
+    color: gray;
+}
+
+.listing-this {
+    background-color: #F7F3F7;
+}
+
+.listing-that {
+    background-color: #CECFCE;
+}
+
+.delete-line {
+    background-color: cyan;
+}
+
+.info-label {
+    font-weight: bold;
+    font-size: larger;
+}
+
+.info {
+    font-size: larger;
+}
+
+input, .small-input {
+    font-size: 8pt;
+}
+
+.number-input, .small-number-input {
+    font-size: 8pt;
+    text-align: right;
+}
+
+select, .small-select {
+    font-size: 8pt;
+}
+
+.small-submit {
+    font-size: 8pt;
+}
+
+.search-control {
+    padding: 3px 3px 3px 30px;
+}
+
+
+.page-heading {
+    font-size: 16pt;
+    padding-bottom: 5pt;
+}
+
+form {
+    margin: 0px 0px 0px 0px;
+}

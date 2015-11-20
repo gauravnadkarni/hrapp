@@ -1,0 +1,136 @@
+[-
+    use DBI;
+    use CGI;
+    use MUMMS;
+    
+    $client_id = &authenticate();
+
+    $dbh = &dbh("mumms");
+
+    $new = 0;
+    if ($fdat{id}) {
+        my $sth = $dbh->prepare_cached(q{
+            SELECT Tracking_Item_ID, Name, Description, Repeats, Repeat_Units
+            FROM Tracking_Item
+            WHERE Tracking_Item_ID = ?
+              AND Client_ID = ?
+        }) or die $dbh->errstr();
+        $sth->execute($fdat{id}, $client_id) or die $sth->errstr();
+        %fdat = %{ $sth->fetchrow_hashref() };
+        $sth->finish();
+        $fdat{repeat} = ($fdat{repeats} ? 'Y' : 'N');
+        @fdat{qw/ repeats repeat_units /} = (3, 'M') if $fdat{repeat} eq 'N';
+       
+    }
+    elsif (!$fdat{editing}) {
+        $new++;
+        @fdat{qw/ repeat repeats repeat_units /} = ('N', 3, 'M');
+    }
+    %max = (D => 365, W => 52, M => 72, Q => 12, Y => 100);
+    if ($fdat{Save}) {
+        $error{name} = 'required' unless $fdat{name};
+        if ($fdat{repeat} eq 'Y') {
+            my $r = $fdat{repeats};
+            if (defined $r && $r ne '') {
+                if ($r !~ /^\d+$/ || $r < 1 || $r > $max{$fdat{repeat_units}}) {
+                    $error{repeats} = 'bad-value';
+                }
+            }
+            else {
+                $error{repeats} = 'required';
+            }
+        }
+        unless (keys %error) {
+            @fdat{qw/ repeats repeat_units /} = (0, undef) if $fdat{repeat} eq 'N';
+            if ($fdat{tracking_item_id}) {        
+                my $up = $dbh->prepare_cached(q{
+                    UPDATE Tracking_Item
+                    SET Name = ?, Description = ?, Repeats = ?, Repeat_Units = ?
+                    WHERE Tracking_Item_ID = ?
+                      AND Client_ID = ?
+                }) or die $dbh->errstr();
+                $up->execute(@fdat{qw/ name description repeats repeat_units tracking_item_id /}, $client_id) or die $ins->errstr();
+                $up->finish();
+            }
+            else {
+                my $ins = $dbh->prepare_cached(q{
+                    INSERT INTO Tracking_Item (Client_ID, Tracking_Item_ID, Name, Description, Repeats, Repeat_Units)
+                    SELECT ?, COALESCE(MAX(Tracking_Item_ID), 0) + 1, ?, ?, ?, ?
+                      FROM Tracking_Item
+                     WHERE Client_ID = ? 
+                }) or die $dbh->errstr();
+                $ins->execute($client_id, @fdat{qw/ name description repeats repeat_units /}, $client_id) or die $ins->errstr();
+                $ins->finish();
+            }
+            $dbh->commit();
+            CGI::redirect('tracking_items.html');
+        }
+    }
+    elsif ($fdat{Cancel}) {
+        CGI::redirect('tracking_items.html');
+    }
+    
+-]
+<html>
+<head>
+<link rel="stylesheet" type="text/css" href="../mumms.css">
+</head>
+<body>
+<form method="GET">
+<h3>Create New Tracking Item<h3>
+<table align="center" border="0" cellpadding="10" cellspacing="0">
+  [$ if $error{name} eq 'required' $]
+  <tr>
+    <td colspan="2" class="error-message">A tracking item name is required.</td>
+  </tr>
+  [$ endif $]
+  <tr>
+    <td>Tracking Item Name</td>
+    <td><input name="name"></td>
+  </tr>
+  <tr>
+    <td>Description</td>
+    <td><textarea rows="4" cols="40" name="description"></textarea></td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <input type="radio" name="repeat" value="N">Does not repeat
+    </td>
+  </tr>
+  [$ if $error{repeats} eq 'required' $]
+  [- %u = (D => 'days', W => 'weeks', M => 'months', Q => 'quarters', Y => 'years') -]
+  <tr>
+    <td class="error-message" colspan="2">Enter a number of [+ $u{$fdat{repeat_units}} +].</td>
+  </tr>
+  [$ endif $]
+  [$ if $error{repeats} eq 'bad-value' $]
+  <tr>
+    <td class="error-message" colspan="2">Please enter a number value between 1 and [+ $max{$fdat{repeat_units}} +].</td>
+  </tr>
+  [$ endif $]
+  <tr>
+    <td colspan="2">
+      <input type="radio" name="repeat" value="Y">Repeats once every
+      <input size="5" name="repeats">
+      <select name="repeat_units">
+        <option value="D">Days</option>
+        <option value="W">Weeks</option>
+        <option value="M">Months</option>
+        <option value="Q">Quarters</option>
+        <option value="Y">Years</option>
+      </select>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="right">
+      <input type="Submit" name="Save" value="  Save  ">
+      <input type="Submit" name="Cancel" value=" Cancel">
+    </td>
+  </tr>
+</table>
+<input type="hidden" name="editing" value="1">
+[$ hidden $]
+</form>
+</body>
+</html>
+[- $dbh->disconnect() -]

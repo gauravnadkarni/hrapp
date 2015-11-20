@@ -1,0 +1,120 @@
+[-
+    use DBI;
+    use MUMMS;
+
+#    &MUMMS::sniff();
+
+    $dbh = &dbh("mumms");
+
+    if ($fdat{company_id}) {
+        $fdat{client_id} = $fdat{company_id};
+        delete $fdat{company_id};
+    }
+
+    $sth = $dbh->prepare(q{
+        SELECT COUNT(*)
+          FROM Client
+         WHERE Handle = ?
+    }) or die $dbh->errstr();
+    ($exists) = $dbh->selectrow_array($sth, {}, $fdat{client_id}) or die $dbh->errstr();
+    CGI::redirect('no-client.html') if !$exists;
+    $sth->finish();
+
+    if ($fdat{login}) {
+        if ($fdat{client_id} ne 'demo' && !$fdat{password}) {
+            $error = 'blank';
+        }
+        else {
+            $sth = $dbh->prepare(q{
+                SELECT HR_Password, Client_ID
+                  FROM Client
+                 WHERE Handle = ?
+            })  or die $dbh->errstr();
+            ($password, $client_id) = $dbh->selectrow_array($sth, {}, $fdat{client_id}) or die $dbh->errstr();
+            if ($fdat{client_id} ne 'demo' && (!$password || $password ne $fdat{password})) {
+                $error = 'password';
+            }
+            else {
+                $cookie = new CGI::Cookie(-name => mumms_client, -value => $client_id, -path => $ENV{REQUEST_URI} =~ m|(.*/)|)
+;
+                $req_rec->header_out('Set-Cookie' => $cookie);
+                CGI::redirect('persons.html?hd=Y');
+            }
+        }
+    }
+    delete $fdat{password};
+    $fdat{password} = 'hr' if $fdat{client_id} eq 'demo';
+-]
+
+<HTML>
+<HEAD>
+<SCRIPT language=JavaScript>
+<!--
+function init() { document.login.password.focus() }
+-->
+</SCRIPT>
+
+<style type="text/css">
+<!--
+body {
+	background-attachment: fixed;
+	background-image: url(/tr-images/HR_background_crop.gif);
+	background-repeat: no-repeat;
+	background-position: left bottom;
+}
+-->
+</style>
+
+
+
+
+
+
+
+
+
+<title>Login to Human Resources</title>
+</HEAD>
+<BODY  onload="init()"  bgcolor="#FFFFFF" text="#333333" link="#336699" vlink="#336699" alink="#333333">
+<HR SIZE=1>
+<TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
+  <TBODY>
+  <TR> 
+    <TD class=page-heading>
+      <blockquote>
+        <p><font face="Arial, Helvetica, sans-serif" size="6">Login to Human Resources
+          </font></p>
+      </blockquote>
+    </TD>
+    <TD align=right>&nbsp; </TD></TR></TBODY></TABLE>
+<HR SIZE=1>
+<blockquote> 
+  <p><font face="Arial, Helvetica, sans-serif" size="3">Enter login to access 
+    your licensed database </font></p>
+  <p><font face="Arial, Helvetica, sans-serif" size="3">or click <a href="login.html?company_id=demo&password=hr&login=1">here</a> 
+    for a demonstration database.</font></p>
+</blockquote>
+<FORM name=login method="POST">
+[$ if $error eq 'blank' $]
+    <p>You must provide a password to login.</p>
+  [$ elsif $error $]
+    <blockquote><p><font face="Arial, Helvetica, sans-serif" size="3">That was not the correct password. Please try again.</font></p></blockquote>
+  [$ endif $]
+  <blockquote>
+    <p><font face="Arial, Helvetica, sans-serif" size="3">login 
+     <input class="small-input" type="password" name="password">
+    <input class="small-input" type="submit" name="ok" value="enter">
+    <input type="hidden" name="login" value="1">
+      </font></p>
+  </blockquote>
+
+ [$ hidden $]
+
+</FORM>
+</BODY>
+</HTML>
+
+
+
+
+

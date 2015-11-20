@@ -1,0 +1,22 @@
+[-
+    use CGI::Cookie;
+    $state{hello} = 'World!';
+    $cookie = new CGI::Cookie(-path => $ENV{REQUEST_URI},
+                              -name => 'state',
+                              -value => \%state);
+    $req_rec->header_out('Set-Cookie', $cookie);
+-]
+<html>
+<head>
+<title>Sanity Check</title>
+</head>
+<body>
+[- @k = sort keys %ENV -]
+<table border="0" cellpadding="0" cellspacing="3">
+  <tr>
+    <td>[+ $k[$row] +]</td>
+    <td>[+ $ENV{$k[$row]} +]</td>
+  </tr>
+</table>
+</body>
+</html>

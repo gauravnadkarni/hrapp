@@ -1,0 +1,316 @@
+[-
+
+    use DBI;
+    use MUMMS;
+
+    use Date::Manip;
+
+    ($client_id) = &authenticate();
+
+    $fdat{person_id} or die "The id parameter is required";
+
+    $dbh = &dbh("mumms");
+
+    if ($fdat{tracking_item_id}) {
+        $ins = $dbh->prepare_cached(q{
+            INSERT INTO Person_Tracking_Item(
+                Client_ID, Person_Tracking_Item_ID, Person_ID, Tracking_Item_ID
+            )
+            SELECT ?, COALESCE(MAX(Person_Tracking_Item_ID), 0) + 1, ?, ?
+              FROM Person_Tracking_Item
+             WHERE Client_ID = ?
+        }) or die $dbh->errstr();
+        $ins->execute($client_id, $fdat{person_id}, $fdat{tracking_item_id}, $client_id) or die $ins->errstr();
+        $ins->finish();
+        $dbh->commit();
+    }
+    delete $fdat{tracking_item_id};
+
+    $sth = $dbh->prepare_cached(q{
+        SELECT Person_ID, First_Name, Last_Name,
+               Company, Date_Started, Date_Inactive
+          FROM Person
+         WHERE Person_ID = ? AND Client_ID = ?
+    }) or die $dbh->errstr();
+
+    $sth->execute($fdat{person_id}, $client_id) or die $sth->errstr();
+    $person = $sth->fetchrow_hashref();
+    $sth->finish();
+
+    sub tracking_items {
+        my ($dbh, $person_id, $client_id) = @_;
+        my $sth = $dbh->prepare_cached(q{
+            SELECT PTI.Person_Tracking_Item_ID, PTI.Person_ID,
+                   PTI.Tracking_Item_ID,
+                   TI.Name, TI.Description, TI.Repeats, TI.Repeat_Units,
+                   TO_CHAR(PTI.Expires, 'MM/DD/YYYY') AS Expires,
+                   TO_CHAR(PTI.Issued, 'MM/DD/YYYY') AS Issued
+              FROM Tracking_Item TI, Person_Tracking_Item PTI
+             WHERE PTI.Tracking_Item_ID = TI.Tracking_Item_ID
+               AND PTI.Client_ID = TI.Client_ID
+               AND PTI.Person_ID = ?
+               AND PTI.Client_ID = ?
+          ORDER BY TI.Name, PTI.Person_Tracking_Item_ID
+        }) or die $dbh->errstr();
+        $sth->execute($person_id, $client_id) or die $sth->errstr();
+        my ($tracking_item, @tracking_items);
+        while ($tracking_item = $sth->fetchrow_hashref()) {
+            push @tracking_items, $tracking_item;
+        }
+        $sth->finish();
+        @tracking_items;
+    }
+
+    if ($fdat{confirm_delete}) {
+        $del = $dbh->prepare(q{
+            DELETE FROM Person_Tracking_Item
+            WHERE Person_Tracking_Item_ID = ?
+              AND Client_ID = ?
+        }) or die $dbh->errstr();
+        $del->execute($fdat{confirm_delete}, $client_id) or die $del->errstr();
+        $del->finish();
+        $dbh->commit();
+    }
+    delete $fdat{confirm_delete};
+
+    $delete = $fdat{delete} if $fdat{delete};
+    delete $fdat{delete};
+
+    sub trim {
+        local ($_) = @_;
+        s/^\s+//;
+        s/\s+$//;
+        $_;
+    }
+    
+    if ($fdat{Update}) {
+        $up = $dbh->prepare_cached(q{
+            UPDATE Person_Tracking_Item
+               SET Expires = ?,
+                   Issued = ?
+             WHERE Person_Tracking_Item_ID = ?
+               AND Client_ID = ?
+        }) or die $dbh->errstr();
+        @tracking_items = &tracking_items($dbh, $fdat{person_id}, $client_id);
+        foreach $i (0..(@tracking_items - 1)) {
+            $ti = $tracking_items[$i];
+
+            $issued = &trim($fdat{"tracking_item_issued_$i"});
+            undef $issued unless $issued;
+            if ($issued) {
+                $issued = &ParseDate($issued);
+                $issued = &Date_SetTime($issued, 0, 0, 0);
+                unless ($issued) {
+                    $error{"tracking_item_issued_$i"} = $fdat{"tracking_item_issued_$i"};
+                }
+            }
+
+            $expires = &trim($fdat{"tracking_item_expires_$i"});
+            undef $expires unless $expires;
+            if ($expires) {
+                $expires = &ParseDate($expires);
+                $expires = &Date_SetTime($expires, 0, 0, 0);
+                unless ($expires) {
+                    $error{"tracking_item_expires_$i"} = $fdat{"tracking_item_expires_$i"};
+                }
+            }
+
+            next if keys %error;
+
+            next if
+                $issued_unchanged = (
+                  (!$issued && ! defined $$ti{issued})
+                    ||
+                  !&Date_Cmp($issued, $$ti{issued})
+                )
+                and
+                (
+                  (!$expires && ! defined $$ti{expires})
+                      ||
+                  !&Date_Cmp($expires, $$ti{expires})
+                );
+
+            if (!$issued_unchanged && $issued && !$expires) {
+                my $item = $dbh->prepare_cached(q{
+                    SELECT Repeats, Repeat_Units
+                      FROM Tracking_Item
+                     WHERE Tracking_Item_ID = ?
+                       AND Client_ID = ?
+                }) or die $dbh->errstr();
+                my ($count, $unit) = $dbh->selectrow_array($item, {}, $$ti{tracking_item_id}, $client_id);
+                if ($count > 0) {
+                    my $err;
+                    SWITCH: for ($unit) {
+                        /^M$/ and $expires = &DateCalc($issued, "+ $count months", \$err);
+                        /^W$/ and $expires = &DateCalc($issued, "+ $count weeks", \$err);
+                        /^Y$/ and $expires = &DateCalc($issued, "+ $count years", \$err);
+                    }
+                    die $err if $err;
+                }
+            }
+
+            $iso8601 = "%Y%m%d";
+
+            $expires = &UnixDate($expires, $iso8601) if $expires;
+            $issued = &UnixDate($issued, $iso8601) if $issued;
+
+            $up->execute($expires, $issued, $$ti{person_tracking_item_id}, $client_id) or die $up->errstr();
+        }
+        $up->finish();
+        $dbh->commit();
+
+        $review = 1;
+    }
+    delete $fdat{Update};
+
+    @tracking_items = &tracking_items($dbh, $fdat{person_id}, $client_id);
+    foreach $i (0..(@tracking_items - 1)) {
+        $fdat{"tracking_item_expires_$i"} = $tracking_items[$i]{expires} || '' unless $error{"tracking_item_expires_$i"};
+        $fdat{"tracking_item_issued_$i"} = $tracking_items[$i]{issued} || '' unless $error{"tracking_item_issued_$i"};
+    }
+
+    $sth->finish();
+
+    if ($$person{first_name} && $$person{last_name}) {
+        $name = "$$person{first_name} $$person{last_name}";
+    }
+    elsif ($$person{last_name}) {
+        $name = $$person{last_name};
+    }
+    else {
+        $name = $$person{first_name} || '';
+    }
+-]
+<html>
+<head>
+<link rel="stylesheet" type="text/css" href="../mumms.css">
+[$ if $delete $]
+<script language="JavaScript">
+<!--
+
+function confirmDelete () {
+    with (document.forms[0]) {
+        elements['confirm_delete'].value = [+ $delete +];
+        submit();
+    }
+}
+
+//-->
+</script>
+[$ endif $]
+</head>
+<body>
+
+<table width="95%" border="0" height="88">
+   <tr>
+      <td height="88"width="70%"><img src="/tr-images/HR_logo.gif"  alt="mumms Software Human Resources Module"></td>
+      <td height="88" width="30%"></td>
+   </tr>
+</table>
+
+<a href="persons.html">Persons</a> | <a href="tracking_items.html">Tracking Items</a> | <a href="expires.html">Notices</a> | <a href="update.html">Update</a>
+<hr size="1">
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td class="page-heading">
+      Edit Tracking Items for [+ $name +] [$ if $$person{company} $] of [+ $$person{company} +]
+      [$ endif $]
+    </td>
+    <td align="right"><a href="tracking_items.html?person_id=[+ $fdat{person_id} +]">Add Tracking Item</a></td>
+  </tr>
+</table>
+
+<hr size="1">
+
+<form method="POST">
+
+<!-- body table -->
+
+<table align="center" border="0" cellpadding="0" cellspacing="0">
+  <tr>
+    <td>
+
+    <!-- Tracking Items Table -->
+
+      <table border="0" cellpadding="5" cellspacing="2" width="500">
+        <tr>
+          <th width="30%" align="left">Action</th>
+          <th width="60%" align="left">Tracking Item</th>
+          <th width="30%" align="left">Issued</th>
+          <th width="30%" align="left">Expires</th>
+        </tr>
+        [$ if @tracking_items $]
+        [$ foreach $i (0..(@tracking_items - 1)) $]
+        [- $class = $i % 2 ? 'listing-this' : 'listing-that' -]
+        [- $tracking_item = $tracking_items[$i] -]
+        [- $deleting = ($delete && $delete == $$tracking_item{person_tracking_item_id}) -]
+        [- $class = $deleting ? 'delete-line' : $i % 2 ? 'listing-this' : 'listing-that' -]
+        [- $class = $i % 2 ? 'listing-this' : 'listing-that' -]
+        [$ if $error{"tracking_item_expires_$i"} $]
+        <tr>
+          <td colspan="4">Incorrect date format ([+ $error{"tracking_item_expires_$i"} +]) for expiration. Please try again.</td>
+        </tr>
+        [$ endif $]
+        [$ if $error{"tracking_item_issued_$i"} $]
+        <tr>
+          <td colspan="4">Incorrect date format ([+ $error{"tracking_item_issued_$i"} +]) for issued. Please try again.</td>
+        </tr>
+        [$ endif $]
+        [$ if $deleting $]
+        <tr>
+          <td colspan="4" class="[+ $class +]">
+            Are you sure you want to delete this tracking item?
+          </td>
+        </tr>
+        [$ endif $]
+        <tr>
+          <td class="[+ $class +]">
+            [$ if $delete $]
+                [$ if $deleting $]
+                <a href="JavaScript:confirmDelete()">Yes</a> | <a href="person.html?person_id=[+ $fdat{person_id} +]">No</a>
+                [$ else $]
+                &nbsp;
+                [$ endif $]
+            [$ else $]
+                <a href="person.html?person_id=[+ $fdat{person_id} +]&delete=[+ $$tracking_item{person_tracking_item_id} +]">Delete</a>
+            [$ endif $]
+          </td>
+          <td class="[+ $class +]">[+ $$tracking_item{name} +]</td>
+          [$ if $delete || $review $]
+          <td class="[+ $class +]" align="right">&nbsp;[+ $fdat{"tracking_item_issued_$i"} +]</td>
+          <td class="[+ $class +]" align="right">&nbsp;[+ $fdat{"tracking_item_expires_$i"} +]</td>
+          [$ else $]
+          <td class="[+ $class +]"><input style="text-align: right" size="8" name="tracking_item_issued_[+ $i +]"></td>
+          <td class="[+ $class +]"><input style="text-align: right" size="8" name="tracking_item_expires_[+ $i +]"></td>
+          [$ endif $]
+        </tr>
+        [$ endforeach $]
+        [$ if !$delete $]
+        <tr>
+          <td colspan="4" align="right">
+            [$ if $review $]
+            <input type="button" onclick="location.href='person.html?person_id=[+ $fdat{person_id} +]'" value="   Edit    "><br>
+            [$ else $]
+            <input type="submit" name="Update" value="Update">
+            [$ endif $]
+          </td>
+        </tr>
+        [$ endif $]
+        [$ else $]
+        <tr>
+          <td colspan="4">There are no tracking items for this person.</td>
+        </tr>
+        [$ endif $]
+      </table>
+
+    </td>
+  </tr>
+</table>
+
+[$ hidden $]
+<input type="hidden" name="confirm_delete" value="0">
+</form>
+</body>
+</html>
+[- $dbh->disconnect() -]

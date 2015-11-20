@@ -1,0 +1,348 @@
+<!--
+    $Id: persons.html,v 1.4 2001/07/31 20:18:27 alan Exp $
+    
+
+    6/21/2001 10:17 am - 11:07 am
+    6/21/2001 11:25 am - 12:50 pm
+-->
+[-
+    # TODO: Nice title.
+
+    # TODO: Show all.
+
+    # TODO: Blank when searching.
+
+    # TODO: Add all option to alphabet.
+
+    # TODO: Default letter A.
+
+
+    use DBI;
+    use MUMMS;
+    use CGI;
+    use CGI::Cookie;
+
+    ($client_id) = &authenticate();
+
+    # %fdat is a hash that contains the CGI key/value pairs 
+    # reminder on how hashes work:
+    #  $fdat{s} returns the value associated with the key, 's'
+    #  s - number of records to show on a page
+    #  p - page number
+    #  l - last name
+
+    CGI::redirect('persons.html') if $fdat{x};
+
+    $dbh = &dbh("mumms");
+
+    $escmode = 0;
+
+    $dbh or die $DBI::errstr;
+
+    %cookies = fetch CGI::Cookie;
+    %state = $cookies{state}->value() if $cookies{state};
+
+    $state{s} ||= 20;
+
+    $COUNT_SQL, $RECORD_SQL;
+
+if ($fdat{hd}) {
+    $COUNT_SQL = q{
+          SELECT COUNT(*)
+            FROM Person
+           WHERE Client_ID = ?
+	     AND Date_Inactive IS NULL
+              %s
+    };
+
+    $RECORD_SQL = q{
+          SELECT Person_ID, First_Name, Last_Name, Sex, Race, Company,
+                 Date_Inactive, Date_Started, Date_Birth
+            FROM Person
+           WHERE Client_ID = ?
+              %s
+	   AND Date_Inactive IS NULL
+        ORDER BY Last_Name, First_Name
+           LIMIT %s OFFSET %s
+    };
+} else {
+    $COUNT_SQL = q{
+          SELECT COUNT(*)
+            FROM Person
+           WHERE Client_ID = ?
+              %s
+    };
+
+    $RECORD_SQL = q{
+          SELECT Person_ID, First_Name, Last_Name, Sex, Race, Company,
+                 Date_Inactive, Date_Started, Date_Birth
+            FROM Person
+           WHERE Client_ID = ?
+              %s
+        ORDER BY Last_Name, First_Name
+           LIMIT %s OFFSET %s
+    };
+
+};
+
+    # Update set size
+
+    if ($fdat{s}) {
+        $state{s} = $fdat{s};
+        $fdat{p} = 1;
+    }
+
+    my $limit = ($fdat{s} = $state{s});                   # Set size
+    my $offset = (($fdat{p} ||= '1') - 1) * $limit;       # Starting set
+    my $letter = ($fdat{l} ||= 'A');                      # Staring letter
+
+    sub cook_parameter {                                
+        my ($p) = @_;
+        $p = uc $p;                             # To upper.
+        $p =~ s/%/%%/g;                         # Escape any percents.
+        $p =~ s/\*/%/g;                         # Replace asterix with percent.
+        $p .= '%' if $p =~ /^(?:[^%]|%%)+$/;    # Maybe append percent.
+        $p;
+    }
+
+    @values = ();
+
+    $fields = 
+    qq{   fn    first_name      text
+          ln    last_name       text
+          cp    company         text };
+    %fields = map { (split)[0,1] } split "\n", $fields;
+
+    if (grep { $fdat{$_} } ('q', keys %fields)) {
+        foreach my $f (sort keys %fields) {
+            next unless defined $fdat{$f} && $fdat{$f} ne '';
+            push @crit, "UPPER($fields{$f}) LIKE ?";
+            push @values, &cook_parameter($fdat{$f});
+            push @qs, "$f=$fdat{$f}";
+        }
+
+        if (@crit) {
+            $where = ' AND ' . (join ' AND ', @crit);
+            $record_sql = sprintf($RECORD_SQL, $where, $limit, $offset);
+            $count_sql = sprintf($COUNT_SQL, $where, $limit, $offset);
+            $query_string = join '&', @qs; 
+            $letter = undef;
+        }
+        $search = 1;
+        delete $fdat{l}; # TODO: Ugly!
+    }
+    elsif (lc $letter eq 'all') {
+        $record_sql = sprintf($RECORD_SQL, '', $limit, $offset);
+        $count_sql = sprintf($COUNT_SQL, '', $limit, $offset);
+        $query_string = 'l=all';
+        delete $fdat{l}; # TODO: Ugly!
+    }
+    else {
+        $fdat{l} = uc $letter;
+        $where = "AND UPPER(Last_Name) LIKE '$letter%'";
+        $record_sql = sprintf($RECORD_SQL, $where, $limit, $offset);
+        $count_sql = sprintf($COUNT_SQL, $where, $limit, $offset);
+        $query_string = "l=$letter";
+    }
+
+    if ($record_sql) {
+        ($record_count) = $dbh->selectrow_array($count_sql, {}, $client_id, @values);
+
+        $sth = $dbh->prepare($record_sql) or die $dbh->errstr();
+        $sth->execute($client_id, @values) or die $sth->errstr();
+    }
+    else {
+        $record_count = 0;
+    }
+
+    $cookie = new CGI::Cookie(-path => $ENV{REQUEST_URI},
+                              -name => 'state',
+                              -value => \%state);
+    $req_rec->header_out('Set-Cookie', $cookie);
+-]
+<html>
+
+<head>
+
+<title>
+
+[$ if $fdat{l} $]
+
+Persons [+ $fdat{l} +]
+
+[$ endif $]
+
+</title>
+
+<link rel="stylesheet" type="text/css" href="../mumms.css">
+</head>
+
+<body>
+<table width="95%" border="0" height="88">
+   <tr>
+      <td height="88"width="70%"><img src="/tr-images/HR_logo.gif"  alt="mumms Software Human Resources Module"></td>
+      <td height="88" width="30%"></td>
+   </tr>
+</table>
+<form>
+
+<strong>Persons</strong> | <a href="tracking_items.html">Tracking Items</a> | <a href="expires.html">Notices</a> | <a href="update.html">Update</a>
+
+<hr size="1">
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td class="page-heading">Persons</td>
+    <td align="right">
+      [$ if $fdat{l} $]
+        [$ if $record_count $]
+        [+ $record_count +] person[+ $record_count > 1 ? 's' : '' +] with names beginning [+ $fdat{l} +].
+        [$ else $]
+        There are no persons with names beginning [+ $fdat{l} +].
+        [$ endif $]
+      [$ elsif $search $]
+      [$ endif $]
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      [$ if !$search $]
+      <div class="search-control">
+      [$ foreach $letter (A..Z) $]
+	[$ if $fdat{hd} $]
+	<a href="persons.html?l=[+ $letter +]&hd=Y">[+ $letter +]</a> |
+	[$ else $]
+      <a href="persons.html?l=[+ $letter +]">[+ $letter +]</a> |
+	[$ endif $]
+      [$ endforeach $]
+      <a href="persons.html?l=all">All</a>
+      </div>
+      [$ endif $]
+      <div class="search-control">
+      [$ if $search $]
+      <em>
+        Enter search values. You do not need to enter a value in each field.
+        You can search by the starting letters of a name.
+      </em>
+      </div>
+      <div class="search-control">
+      
+          First Name
+          <input class="small-input" name="fn">
+          Last Name
+          <input class="small-input" name="ln">
+          Company
+          <input class="small-input" name="cp">
+          <input type="submit" class="small-submit" name="q" value="Search">
+          <input type="submit" class="small-submit" name="x" value="Cancel">
+      [$ else $]
+	[$ if $fdat{hd} $]
+	<a href="persons.html?q=q"><b>Search</b></a> | <b>Hide Inactive</b>: <input type="checkbox" name="hd" value=Y  checked onchange="form.submit()"  />
+	[$ else $]
+      <a href="persons.html?q=q"><b>Search</b></a> | <b>Hide Inactive</b>: <input type="checkbox" name="hd" value=Y  onchange="form.submit()"  />
+      	[$ endif $]
+      [$ endif $]
+      </div>
+      <div class="search-control">
+      [- @sizes = qw(10 15 20 25 50 100 200) -]
+      Display <select class="small-select" name="s" onchange="form.submit()">
+                <option value="[+ $sizes[$row] +]">[+ $sizes[$row] +]</option>
+              </select> records at one time.
+      </div>
+    </td>
+  </tr>
+</table>
+
+<hr size="1">
+
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+  <tr>
+    <td align="right">
+      [$ if $record_count $]
+      [-
+          $pages = int($record_count / $fdat{s}) + ($record_count % $fdat{s} ? 1 : 0);
+          $page = $fdat{p};
+          $start = $count = ($fdat{p} - 1) * $fdat{s} + 1;
+          $stop = $start + $fdat{s} - 1;
+          $stop = $record_count if $stop > $record_count;
+      -]
+      <p>
+      Page <strong>[+ $page +]</strong> of <strong>[+ $pages +]</strong> - 
+      Persons <strong>[+ $start +]</strong> through <strong>[+ $stop +]</strong>
+      [$ if $pages > 1 $]
+      -
+      Go to page: 
+      [$ foreach $p (1..$pages) $]
+      [$ if $p == $page $]<strong>[+ $p +]</strong>[$ else $]<a href="persons.html?[+ $query_string +]&p=[+ $p +]">[+ $p +]</a>[$ endif $]
+      [$ if $p < $pages $] | [$ endif $]
+      [$ endforeach $]
+      [$ endif $]
+      </p>
+      [$ endif $]
+      [- $line = 0 -]
+      <table border="0" cellpadding="3" cellspacing="2" width="100%">
+        <tr>
+          <th>&nbsp;</th>
+          <th align="left" nowrap>Action</th>
+          <th align="left" nowrap>Name</th>
+          <th align="left" nowrap>Company</th>
+          <th align="left" nowrap>Date Active</th>
+         [$ if $fdat{hd} $]
+      <!--    <th align="left" nowrap>Date Inactive</th>  -->
+	[$ else $]
+          <th align="left" nowrap>Date Inactive</th>
+	[$ endif $]
+        </tr>
+        [$ if $record_count $]
+        [$ while $rec = $sth->fetchrow_hashref() $]
+        [- $class = $line++ % 2 ? 'listing-this' : 'listing-that' -]
+        <tr>
+          <td class="[+ $class +]">[+ $count++ +]</td>
+          <td class="[+ $class +]">
+            <a href="person.html?person_id=[+ $$rec{person_id} || '' +]">Edit</a>
+          </td>
+          <td class="[+ $class +]">
+            [+ do {
+              if ($$rec{first_name} && $$rec{last_name}) {
+                  "$$rec{last_name}, $$rec{first_name}"
+              }
+              else {
+                  $$rec{first_name} || $$rec{last_name} || ''
+              }
+            } +]
+          </td>
+          <td class="[+ $class +]">[+ $$rec{company} || '' +]&nbsp;</td>
+          <td class="[+ $class +]">[+ $$rec{date_started} || '' +]&nbsp;</td>
+	[$ if $fdat{hd} $]
+	<!-- <td class="[+ $class +]">[+ $$rec{date_inactive} || '' +]&nbsp;</td> -->
+	[$ else $]
+          <td class="[+ $class +]">[+ $$rec{date_inactive} || '' +]&nbsp;</td> 
+        [$ endif $]
+	</tr>
+        [$ endwhile $]
+        [$ else $]
+        <td colspan="6" class="listing-that">&nbsp;</td>
+        [$ endif $]
+      </table>
+      [$ if $record_count $]
+      <p>
+      Page <strong>[+ $page +]</strong> of <strong>[+ $pages +]</strong> - 
+      Persons <strong>[+ $start +]</strong> through <strong>[+ $stop +]</strong>
+      [$ if $pages > 1 $]
+      -
+      Go to page: 
+      [$ foreach $p (1..$pages) $]
+      [$ if $p == $page $]<strong>[+ $p +]</strong>[$ else $]<a href="persons.html?[+ $query_string +]&p=[+ $p +]">[+ $p +]</a>[$ endif $]
+      [$ if $p < $pages $] | [$ endif $]
+      [$ endforeach $]
+      [$ endif $]
+      </p>
+      [$ endif $]    
+    </td>
+  </tr>
+</table>
+[$ hidden $]
+</form>
+</body>
+</html>
+[- $sth && $sth->finish(); $dbh->disconnect() -]

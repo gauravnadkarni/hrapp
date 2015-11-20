@@ -1,0 +1,34 @@
+[-
+    use DBI;
+    use CGI;
+    use CGI::Cookie;
+
+    $dbh = &dbh("mumms");
+
+    if ($fdat{person_id}) {
+        ($client_id) = $dbh->selectrow_array(q{
+            SELECT Client_ID
+              FROM Person
+             WHERE Person_ID = ?
+        }, {}, $fdat{person_id}) or die $dbh->errstr();
+        if ($client_id) {
+            $cookie = new CGI::Cookie(-name => mumms_client, -value => $client_id, -path => $ENV{REQUEST_URI} =~ m|(.*/)|);
+            $req_rec->header_out('Set-Cookie' => $cookie);
+            CGI::redirect('persons.html');
+        }
+        else {
+            $cookie = new CGI::Cookie(-name => mumms_client, -value => '', -path => $ENV{REQUEST_URI} =~ m|(.*/)|);
+            $req_rec->header_out('Set-Cookie' => $cookie);
+        }
+    }
+
+    $dbh->disconnect();
+-]
+<html>
+<head>
+<title>Authentication Failure</title>
+</head>
+<body>
+You are not authorized to use this server.
+</body>
+</html>

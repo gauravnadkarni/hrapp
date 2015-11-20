@@ -1,0 +1,132 @@
+[-
+    use DBI;
+    use MUMMS;
+    use CGI;
+
+    $dbh = &dbh("mumms");
+
+    if ($fdat{editing}) {
+        if ($fdat{save}) {
+            $error{name} = 'required' unless $fdat{name};
+            if ($fdat{handle}) {
+                $error{handle} = 'alpha' unless $fdat{handle} =~ /^[-\w\d]+$/;
+            }
+            else {
+                $error{handle} = 'required';
+            }
+            if (!keys %error) {
+                if ($fdat{client_id}) {
+                    $ins = $dbh->prepare(q{
+                        UPDATE Client
+                           SET Name = ?, Handle = ?, HR_Password = ?, HR_Signature = ?
+                         WHERE Client_ID = ?
+                    }) or die $dbh->errstr();
+                    $ins->execute(@fdat{qw(name handle hr_password hr_signature client_id)}) or die $ins->errstr();
+                    $ins->finish();
+                }
+                else {
+                    $up = $dbh->prepare(q{
+                        INSERT INTO Client (Client_ID, Name, Handle, HR_Password, HR_Signature)
+                        SELECT COALESCE(MAX(Client_ID), 0) + 1, ?, ?, ?, ?
+                          FROM Client
+                    }) or die $dbh->errstr();
+                    $up->execute(@fdat{qw(name handle hr_password hr_signature)}) or die $ins->errstr();
+                    $up->finish();
+                }
+                $dbh->commit();
+                $dbh->disconnect();
+                CGI::redirect('clients.html');
+            }
+        }
+        elsif ($fdat{cancel}) {
+            $dbh->disconnect();
+            CGI::redirect('clients.html');
+        }
+    }
+    elsif ($fdat{id}) {
+        $sth = $dbh->prepare(q{
+            SELECT *
+              FROM Client
+             WHERE Client_ID = ?
+        }) or die $dbh->errstr();
+        $sth->execute($fdat{id}) or die $sth->errstr();
+        %fdat = %{ $sth->fetchrow_hashref() };
+        $sth->finish();
+    }
+-]
+<html>
+
+<head>
+<script langauge="JavaScript" src="mumms.js"></script>
+<link rel="stylesheet" type="text/css" href="mumms.css">
+</head>
+
+<body onload="saveForm('client')">
+
+<a href="JavaScript:confirmCancel('clients.html')">Clients</a>
+
+<hr size="1">
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td class="page-heading">
+      Edit Client
+    </td>
+    <td align="right">
+      &nbsp;
+    </td>
+  </tr>
+</table>
+
+<hr size="1">
+
+<form name="client" method="POST">
+
+<table border="0" cellpadding="5" cellspacing="0">
+  [$ if $error{name} $]
+  <tr>
+    <td colspan="2">Company name is a required field.</td>
+  </tr>
+  [$ endif $]
+  <tr>
+    <td>Company Name</td>
+    <td><input class="small-input" name="name"></td>
+  </tr>
+  [$ if $error{handle} eq 'required' $]
+  <tr>
+    <td colspan="2">Login handle is a required field.</td>
+  </tr>
+  [$ endif $]
+  [$ if $error{handle} eq 'alpha' $]
+  <tr>
+    <td colspan="2">The login handle can only cotain alpha-numeric characters, hyphens and underscores.</td>
+  </tr>
+  [$ endif $]
+  <tr>
+    <td>Login Handle</td>
+    <td><input class="small-input" name="handle"></td>
+  </tr>
+  <tr>
+    <td>HR Password</td>
+    <td><input class="small-input" name="hr_password"></td>
+  </tr>
+  <tr>
+    <td>HR Signature</td>
+    <td><input class="small-input" name="hr_signature"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="right">
+      <input class="small-submit" type="submit" name="save" value="    OK    ">
+      <input class="small-submit" type="submit" name="cancel" value="Cancel">
+    </td>
+  </tr>
+</table>
+
+<input type="hidden" name="editing" value="1">
+
+[$ hidden $]
+
+</form>
+</body>
+</html>
+[- $dbh && $dbh->disconnect() -]

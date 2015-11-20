@@ -1,0 +1,176 @@
+[-
+    use DBI;
+    use MUMMS;
+    use Date::Manip;
+
+    ($client_id) = &authenticate();
+
+    $dbh = &dbh("mumms");
+
+    $ins = $dbh->prepare(q{
+        INSERT INTO Letters (Person_ID) VALUES(?)
+    }) or die $dbh->errstr();
+
+    foreach $person_id (split /\t/, $fdat{person_id}) {
+        $ins->execute($person_id) or die $ins->errstr();
+    }
+
+    $persons = $dbh->prepare(q{
+        SELECT P.Person_ID, P.First_Name, P.Last_Name,
+               P.Address, P.City, P.State, P.ZIP
+          FROM Person P
+         WHERE P.Client_ID = ?
+	   AND P.Person_ID IN (SELECT Person_ID FROM Letters)
+      ORDER BY P.Last_Name, P.First_Name
+    }) or die $dbh->errstr();
+
+    $persons->execute($client_id) || die $persons->errstr();
+    push @persons, $person if $person = $persons->fetchrow_hashref();
+
+    $items = $dbh->prepare(q{
+        SELECT TI.Name,
+               TI.Description,
+               TO_CHAR(PTI.Expires, 'MM/DD/YYYY') AS Expires,
+               TO_CHAR(PTI.Issued, 'MM/DD/YYYY') AS Issued
+          FROM Tracking_Item TI,
+               Person_Tracking_Item PTI
+         WHERE TI.Client_ID = PTI.Client_ID
+           AND TI.Tracking_Item_ID = PTI.Tracking_Item_ID
+           AND PTI.Client_ID = ?
+           AND PTI.Person_ID = ?
+           AND (PTI.Expires <= ? OR PTI.Expires IS NULL OR PTI.Issued IS NULL)
+      ORDER BY TI.Name 
+    }) or die $dbh->errstr();
+
+    ($sig) = $dbh->selectrow_array(q{
+        SELECT HR_Signature
+          FROM Client
+         WHERE Client_ID = ?
+    }, {}, $client_id);
+    $dbh->err() and die $dbh->errstr();
+
+    $agencies = "Medicaid, JCAHO";  
+    if ($client_id == 55 || $client_id == 62 || $client_id == 60 || $client_id == 57) {   
+        #this list of agencies will appear for procareca only
+        $agencies = "Medi-Cal, CHAP";
+    }
+
+    if ($client_id == 73 || $client_id == 72) {
+		# this agencies w/o JCAHO will appear for centwy and circ only
+	    $agencies = "Medicaid";
+	}
+
+    if ($client_id == 87) {
+		# for jimcare only Medicare and CHAP will appear. drew 1/30/15
+	    $agencies = "Medicaid, CHAP";
+	}
+
+    if ($client_id == 82) {
+		# for corva only Medicare will appear. drew 12/8/14
+	    $agencies = "";
+	}
+
+    if ($client_id == 78) {
+	    $agencies = "Medicaid, CHAP";
+	}
+
+	if ($client_id == 82) {	# corva
+		$deadline = ".";
+		$asap = "prior to the expiration date.";
+		$close = "Thank you";
+		$policies = "BHS policies";
+	} else {
+		$deadline = "<u>within 48 hours of the request.</u>";
+		$asap = "as soon as possible.";
+		$close = "Sincerely";
+		$policies = "our policies and procedures";
+	}
+
+    $sig ||= 'Human Resources';
+-]
+<html>
+<head>
+<link rel="stylesheet" type="text/css" href="../mumms.css">
+</head>
+<body>
+
+[- $first_page_printed = 0 -]
+[$ while $person = pop @persons || $persons->fetchrow_hashref() $]
+[-
+    $items->execute($client_id, $$person{person_id}, $fdat{date}) or die $items->errstr();
+    push @items, $item if $item = $items->fetchrow_hashref();
+-]
+[$ if @items $]
+[$ if !$first_page_printed++ $]
+<p>
+[$ else $]
+<p style="page-break-before: always">
+[$ endif $]
+[-
+    ($f, $l) = @$person{qw(first_name last_name)};
+    $name = $l && $f ? "$f $l" : $l ? $l : $f ? $f : 'Unknown Employee';
+-]
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<p>[+
+if ($client_id == 82) {
+	&UnixDate('today', '%B %e, %Y')
+} else {
+	&UnixDate('today', '%A, %B %E, %Y')
+}
++]</p>
+<p>
+[+ $name +]<br>
+[+ $$person{address} || 'No Address' +]<br>
+[+ $$person{city} || 'No City' +],
+[+ $$person{state} || 'No State' +]
+[+ $$person{zip} || 'No ZIP' +]
+</p>
+Dear [+ $f +],
+</p>
+
+<p>According to [+ $policies +], and to remain in compliance with Medicare,
+[+ $agencies +] and other state and federal regulations, it is required that
+each employee's personnel file be complete and up to date [+ $deadline +]</p>
+
+<p>In reviewing your file, the following items need to be updated:</p>
+
+<table border="1" cellpadding="5" cellspacing="0">
+  <tr>
+    <th>Item</th>
+    <th>Description</th>
+    <th>Date Expires</th>
+  </tr>
+  [$ while $item = pop @items || $items->fetchrow_hashref() $]
+  <tr>
+    <td>[+ $$item{name} +]</td>
+    <td>[$ if $$item{description} $][+ $$item{description} +][$ else $]&nbsp;[$ endif $]</td>
+    <td>[+ $$item{expires} || 'Unknown' +]</td>
+  </tr>
+  [$ endwhile $]
+</table>
+
+<p>In order for your file to be updated in a timely manner, please provide
+the necessary documentation [+ $asap +]
+
+<p>[+ $close +],</p>
+<br>
+<br>
+<br>
+<br>
+<p>[+ $sig +]</p>
+
+[$ endif $]
+[$ endwhile $]
+
+</body>
+</html>
+[- $dbh->rollback() -]
+[- $dbh->disconnect() -]

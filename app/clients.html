@@ -1,0 +1,63 @@
+[-
+    use DBI;
+    use MUMMS;
+
+    $dbh = &dbh("mumms");
+
+    $clients = $dbh->prepare(q{
+        SELECT Client_ID, Name, Handle
+          FROM Client
+    }) or die $dbh->errstr();
+    $clients->execute() or die $clients->errstr();
+    push @clients, $client if $client = $clients->fetchrow_hashref();
+-]
+<html>
+
+<head>
+<link rel="stylesheet" type="text/css" href="mumms.css">
+</head>
+
+<body>
+
+<hr size="1">
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td class="page-heading">
+      Clients
+    </td>
+    <td align="right">
+      <a href="client.html">Add New Client</a>
+    </td>
+  </tr>
+</table>
+
+<hr size="1">
+
+<table border="0" cellpadding="3" cellspacing="2" width="100%">
+  <tr>
+    <th width="1%">&nbsp;</th>
+    <th>Name</th>
+    <th>Handle</th>
+  </tr>
+  [$ if @clients $]
+  [- $line = 0 -]
+  [$ while $client = (pop @clients || $clients->fetchrow_hashref()) $]
+  [- $class = $line++ % 2 ? 'listing-this' : 'listing-that' -]
+  <tr>
+    <td class="[+ $class +]"><a href="client.html?id=[+ $$client{client_id} +]">Edit</a></td>
+    <td class="[+ $class +]">[+ $$client{name} +]</td>
+    <td class="[+ $class +]">[+ $$client{handle} +]</td>
+  </tr>
+  [$ endwhile $]
+  [$ else $]
+  <tr>
+    <td class="listing-that" colspan="3">
+      There are no clients in the database.
+    </td>
+  </tr>
+  [$ endif $]
+</table>
+</body>
+</html>
+[- $dbh && $dbh->disconnect() -]

@@ -1,0 +1,24 @@
+
+
+
+[- 
+
+
+system("sh /var/www/mumms/prepare_and_get_HRdata.sh");
+
+system("/var/www/mumms/./update-persons-test", "qurdaletest.txt");
+
+ -]
+
+
+
+<html>
+
+<title>mumms Human Resources Moduls : Update</title>
+<body>
+Hello, welcome to the Update page.
+
+
+
+</body>
+</html>
